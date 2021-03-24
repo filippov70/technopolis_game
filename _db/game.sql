@@ -50,7 +50,7 @@ ALTER FUNCTION game.add_user(user_name character varying, passwd character varyi
 -- Name: do_answer(integer, integer, integer); Type: FUNCTION; Schema: game; Owner: game
 --
 
-CREATE FUNCTION game.do_answer(player_id integer, question_id integer, user_answer integer) RETURNS public.geometry
+CREATE FUNCTION game.do_answer(player_id integer, question_id integer, user_answer integer) RETURNS json
     LANGUAGE plpgsql
     AS $$
 DECLARE
@@ -93,7 +93,7 @@ BEGIN
               (SELECT question FROM game.game WHERE player = player_id)
     );
 
-    RETURN l_return_point;
+    RETURN public.st_asgeojson(l_return_point, 7);
 END;
 $$;
 
@@ -140,10 +140,10 @@ ALTER FUNCTION game.make_buffer64(radius_b double precision, pt public.geometry)
 -- Name: make_turn(integer); Type: FUNCTION; Schema: game; Owner: game
 --
 
-CREATE FUNCTION game.make_turn(player_id integer) RETURNS public.geometry
+CREATE FUNCTION game.make_turn(player_id integer) RETURNS json
     LANGUAGE plpgsql
     AS $$
-DECLARE 
+DECLARE
         l_return_point geometry;
         l_current_player integer;
         l_current_question integer;
@@ -158,7 +158,7 @@ DECLARE
         IF l_current_player IS NOT NULL THEN
             RAISE NOTICE 'Уже есть';
            -- при последующих ходах (после ответов) записи о новых вопросах и их точках вносит другая функция
-            
+
         ELSE
             RAISE NOTICE 'Первый ход';
             SELECT id INTO l_current_question FROM game.questions WHERE id = 1;
@@ -167,11 +167,11 @@ DECLARE
         END IF;
         -- взять первую точку
         SELECT geom INTO l_return_point FROM game.points p WHERE id in (
-            SELECT linked_point FROM game.questions WHERE id in 
+            SELECT linked_point FROM game.questions WHERE id in
             (SELECT question FROM game.game WHERE player = player_id)
         );
 
-        RETURN l_return_point;
+        RETURN public.st_asgeojson(l_return_point, 7);
     END;
 $$;
 
