@@ -55,45 +55,54 @@ CREATE FUNCTION game.do_answer(player_id integer, question_id integer, user_answ
     AS $$
 DECLARE
     l_return_point     geometry := NULL;
+    l_curr_player      integer  := NULL;
     l_next_point_id    integer;
     l_current_answer   integer;
     l_current_question integer;
+    l_current_score    interval := NULL;
 
 BEGIN
-    SELECT correct_answer INTO l_current_answer FROM game.questions WHERE id = question_id;
-    IF l_current_answer = user_answer THEN
-        RAISE NOTICE 'Ответ верный';
-        -- следующая точка
-        SELECT next_point INTO l_next_point_id FROM game.questions WHERE id = question_id;
-        -- следующий вопрос
-        SELECT id INTO l_current_question FROM game.questions WHERE linked_point = l_next_point_id;
-        IF l_current_question IS NOT NULL THEN
-            INSERT INTO game.game (player, question)
-            VALUES (player_id, l_current_question); -- штрафных очков нет
-            --RETURN l_next_point_id;
-        ELSE -- следующая null, конец. Назначить результирующие очки
-            UPDATE game.game SET result = LOCALTIME - game.time_start + game.score WHERE game.player = player_id;
-            RETURN NULL;
+    SELECT player_id INTO l_curr_player FROM game.game WHERE player = player_id;
+    -- сделал ли пользовать хоть один ход?
+    IF l_curr_player IS NOT NULL THEN
+        SELECT correct_answer INTO l_current_answer FROM game.questions WHERE id = question_id;
+        IF l_current_answer = user_answer THEN
+            RAISE NOTICE 'Ответ верный';
+            -- следующая точка, у последнего вопроса - NULL
+            SELECT next_point INTO l_next_point_id FROM game.questions WHERE id = question_id;
+            IF l_next_point_id IS NOT NULL THEN
+                -- следующий вопрос
+                SELECT id INTO l_current_question FROM game.questions WHERE linked_point = l_next_point_id;
+                UPDATE game.game SET question = l_current_question WHERE game.player = player_id;
+                -- штрафных очков нет
+            ELSE -- следующая null, конец. Назначить результирующие очки
+                UPDATE game.game SET result = LOCALTIME - game.time_start + game.score WHERE game.player = player_id;
+                RETURN '{"answer": "finish_game"}'::json;
+            END IF;
+        ELSE
+            RAISE NOTICE 'Ответ неверный';
+            SELECT score INTO l_current_score FROM game.game WHERE game.player = player_id;
+            UPDATE game.game
+            SET score = (l_current_score + MAKE_INTERVAL(0, 0, 0, 0, 0, 15))
+            WHERE game.player = player_id; -- штрафные минуты (15)
+            RETURN '{"answer": "wrong_answer"}'::json;
         END IF;
-    ELSE
-        RAISE NOTICE '';
-        INSERT INTO game.game (player, score)
-        VALUES (player_id, MAKE_INTERVAL(0, 0, 0, 0, 0, 15)); -- штрафные минуты (15)
-        RETURN NULL;
+
+
+        -- взять точку по id вопроса
+        SELECT geom
+        INTO l_return_point
+        FROM game.points p
+        WHERE id IN (
+            SELECT linked_point
+            FROM game.questions
+            WHERE id IN
+                  (SELECT question FROM game.game WHERE player = player_id)
+        );
+
+        RETURN public.st_asgeojson(l_return_point, 7);
     END IF;
-
-    -- взять точку по id вопроса
-    SELECT geom
-    INTO l_return_point
-    FROM game.points p
-    WHERE id IN (
-        SELECT linked_point
-        FROM game.questions
-        WHERE id IN
-              (SELECT question FROM game.game WHERE player = player_id)
-    );
-
-    RETURN public.st_asgeojson(l_return_point, 7);
+    RETURN '{"answer": "user_not_found"}'::json;
 END;
 $$;
 
@@ -378,7 +387,7 @@ ALTER TABLE ONLY game.users ALTER COLUMN id SET DEFAULT nextval('game.users_id_s
 --
 
 COPY game.game (id, player, question, score, time_start, result) FROM stdin;
-2	4	1	00:15:00	17:54:37	-11:13:28
+2	4	4	01:00:00	17:54:37	-08:40:36
 \.
 
 
@@ -424,7 +433,7 @@ COPY game.users (id, name, password, full_name) FROM stdin;
 -- Name: game_id_seq; Type: SEQUENCE SET; Schema: game; Owner: game
 --
 
-SELECT pg_catalog.setval('game.game_id_seq', 2, true);
+SELECT pg_catalog.setval('game.game_id_seq', 3, true);
 
 
 --
